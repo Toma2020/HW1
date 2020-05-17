@@ -5,3 +5,8 @@
 *.tab.len
 *.tab.values.at
 *.tab_i
+/file-to-id.tab_i.len
+/id-to-file.tab_i.len
+/lookups.tab.values
+/lookups.tab.values.s
+/lookups.tab_i.len

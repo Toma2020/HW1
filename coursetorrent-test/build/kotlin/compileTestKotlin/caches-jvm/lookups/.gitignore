@@ -1,0 +1,7 @@
+/counters.tab
+*.tab
+*.tab.keystream
+*.tab.keystream.len
+*.tab.len
+*.tab.values.at
+*.tab_i

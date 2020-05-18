@@ -3,13 +3,16 @@ package il.ac.technion.cs.softwaredesign
 import il.ac.technion.cs.softwaredesign.exceptions.TrackerException
 import Bencoding
 import DB_Mananger
-import NetHandler
+import URL_Utils
 import com.google.inject.Inject
 import il.ac.technion.cs.softwaredesign.storage.SecureStorageFactory
 import kotlin.random.Random
+import java.lang.reflect.Type
+import com.google.common.reflect.TypeToken
 
 import com.google.gson.Gson
-import com.google.inject.Guice
+
+import java.net.URL
 
 /**
  * This is the class implementing CourseTorrent, a BitTorrent client.
@@ -18,11 +21,12 @@ import com.google.inject.Guice
  * + Parsing torrent metainfo files (".torrent" files)
  * + Communication with trackers (announce, scrape).
  */
-class CourseTorrent  @Inject constructor(private val fac : SecureStorageFactory, private val netHandler : NetHandler) {
+class CourseTorrent  @Inject constructor(private val fac : SecureStorageFactory) {
 
     private val announceDB = DB_Mananger(fac.open("announceDB".toByteArray()))
     private val peersDB = DB_Mananger(fac.open("peersDB".toByteArray()))
     private val scrapeDB = DB_Mananger(fac.open("scrapeDB".toByteArray()))
+    private val charset = Charsets.UTF_8
     private val gson = Gson()
 
     /**
@@ -41,14 +45,11 @@ class CourseTorrent  @Inject constructor(private val fac : SecureStorageFactory,
 
         val metaInfo = Bencoding.decodeValue(torrent)
 
-        if (!Torrent_Mananger.isValidMetaInfo(metaInfo)){
-            throw IllegalArgumentException()
-        }
+        if (!Torrent_Mananger.isValidMetaInfo(metaInfo))throw IllegalArgumentException()
 
         val infohash : String = Torrent_Mananger.getInfoHash(torrent)
-        if (announceDB.DBContains(infohash)){
-            throw IllegalStateException()
-        }
+        if (announceDB.DBContains(infohash)) throw IllegalStateException()
+
 
         val shallowTorrentMap = Bencoding.decodeFlatDictionary(torrent)
         val announce = shallowTorrentMap["announce-list"] ?: shallowTorrentMap["announce"]
@@ -66,10 +67,12 @@ class CourseTorrent  @Inject constructor(private val fac : SecureStorageFactory,
      * @throws IllegalArgumentException If [infohash] is not loaded.
      */
     fun unload(infohash: String): Unit {
-        if (!announceDB.DBContains(infohash)){
-            throw IllegalArgumentException()
-        }
+        if (!announceDB.DBContains(infohash)) throw IllegalArgumentException()
+
         announceDB.removeFromDB(infohash)
+        peersDB.removeFromDB(infohash)
+        scrapeDB.removeFromDB(infohash)
+
     }
 
     /**
@@ -85,12 +88,9 @@ class CourseTorrent  @Inject constructor(private val fac : SecureStorageFactory,
      * @throws IllegalArgumentException If [infohash] is not loaded.
      * @return Tier lists of announce URLs.
      */
-    fun announces(infohash: String): List<List<String>>
-    {
-        if (!announceDB.DBContains(infohash))
-        {
-            throw IllegalArgumentException()
-        }
+    fun announces(infohash: String): List<List<String>> {
+        if (!announceDB.DBContains(infohash)) throw IllegalArgumentException()
+
         val announce_bencoding = announceDB.loadFromDB(infohash)
         val announce = Bencoding.decodeValue(announce_bencoding)
         if(announce is String){
@@ -132,83 +132,108 @@ class CourseTorrent  @Inject constructor(private val fac : SecureStorageFactory,
      * @return The interval in seconds that the client should wait before announcing again.
      */
     fun announce(infohash: String, event: TorrentEvent, uploaded: Long, downloaded: Long, left: Long): Int {
-/*
+
+        // check if info hash is in the DB
         if(!announceDB.DBContains(infohash)) throw IllegalArgumentException()
 
-        var announce_list = this.announces(infohash)
-        var peerID = Torrent_Mananger.SHA1(("-CS1000-204289318879"+
-                List(6) {Random.nextInt(0,9)}.joinToString("")).toByteArray())
+
+        // get announceList
+        var announceListList = this.announces(infohash)
 
 
+        // if event is STARTED then shuffle
         if(event == TorrentEvent.STARTED) {
-            announce_list = announce_list.shuffled()
-            var announce_list_gson = gson.toJson(announce_list).toByteArray()
-            announceDB.loadToDB(infohash, announce_list_gson)
+            announceListList = announceListList.shuffled()
+            //if shuffled, we also need to update in the announceDB
+            val jsonAnnounceList = Bencoding.encode(announceListList)
+            announceDB.loadToDB(infohash, jsonAnnounceList.toByteArray())
         }
 
-        var compact = 1
+        lateinit var scrapeMap : HashMap<String, ScrapeData>
+        try{
+            val jsonScrapeList = scrapeDB.loadFromDB(infohash).toString(charset)
+            //scrapeMap = gson.fromJson<HashMap<String, ScrapeData>>(jsonScrapeList, HashMap::class.java)
+
+            val type: Type = object : TypeToken<HashMap<String,Scrape>>() {}.getType()
+            scrapeMap = gson.fromJson(jsonScrapeList, type)
+
+        } catch (e : IllegalArgumentException){
+
+            scrapeMap = HashMap<String, ScrapeData>()
+
+        }
+
+
+        // parameters for the 'for' loop
+        var trackerFoundFlag = false
+        var resultInterval = -1
+
+        // parameters for request
+        val peerID = "-CS1000-" + Torrent_Mananger.SHA1(("204289"+"318879").toString().toByteArray()).slice(IntRange(0,5)) +
+                List(6) {Random.nextInt(0,9)}.joinToString("")
+
+        val compact = 1
         var errorMessage = ""
-        var trackerSucceededFlag = false
-        for (t in announce_list){
-            var tracker : String = t.first()
-            if(!tracker.endsWith("/announce")) tracker = tracker+"/announce"
+        val port = 6881
 
-            tracker = tracker + "?"
-            tracker = tracker + "info_hash" + "=" + infohash
-            tracker = tracker + "&" + "peer_id" + "=" + peerID
-            tracker = tracker + "&" + "port" + "=" + 6881.toString()
-            tracker = tracker + "&" + "uploaded" + "=" + uploaded.toString()
-            tracker = tracker + "&" + "downloaded" + "=" + downloaded.toString()
-            tracker = tracker + "&" + "left" + "=" + left.toString()
-            tracker = tracker + "&" + "compact" + "=" + compact.toString()
-            tracker = tracker + "&" + "event" + "=" + event.toString()
+        for (announceList in announceListList){
 
-            print("\n\n\n\n\n\n!!!!!!!!!!!!!!!!!!!"+tracker+"!!!!!!!!!!!!!!!!!!!!!!!!\n" +
-                    "\n" +
-                    "\n" +
-                    "\n" +
-                    "\n" +
-                    "\n")
+            if (trackerFoundFlag) break
 
-            var bencoded_dict = HttpHandler.sendGetRequest(tracker).toString()
-            var dict = Bencoding.decodeValue(bencoded_dict.toByteArray()) as Map<*,*>
-            
-            if(dict.containsKey("failure reason")){
-                errorMessage = dict["failure reason"] as String
-                continue
-            }
+            for (t in announceList){
 
-            trackerSucceededFlag = true
+                // parameters for url
+                var tracker = t
+                val scrapeID = URL_Utils.removeAnnounceFromUrl(tracker)
 
-            var list : MutableList<KnownPeer> = ArrayList<KnownPeer>()
-            if(dict["peers"] is ArrayList<*>){
-                  for (d in (dict["peers"] as ArrayList<*>)){
-                      d as Map<*,*>
-                      var new_peer = KnownPeer(ip = d["ip"] as String, port = d["port"] as Int, peerId = (d["peer id"] ?: null) as String?)
-                      list.add(new_peer)
-                  }
-            } else {
-                var peersss = (dict["peers"] as String)
-                while (peersss.length > 0){
-                    var new_peer = KnownPeer(peersss.substring(0,4), peersss.get(4).toInt()*256+peersss.get(5).toInt(), peerId = null)
-                    list.add(new_peer)
-                    peersss = peersss.substring(6)
+                val httpRequest = HttpHandler.announceRequestFormat(tracker, infohash, peerID, port, uploaded, downloaded, left, compact, event)
+
+                //print("\n\n\n !!!!!" +httpRequest+ "\n\n\n!!!!")
+
+                val httpResponse= HttpHandler.sendGetRequest(httpRequest)
+
+                val dict = Bencoding.decodeValue(httpResponse) as Map<*,*>
+
+                // if request failed, update error reason and continue for next loop
+                if(dict.containsKey("failure reason")){
+
+                    errorMessage = dict["failure reason"] as String
+                    val failure = Failure(errorMessage)
+
+                    scrapeMap[scrapeID] = failure
+
+                    continue
                 }
+
+                // if we get here, the request succeed
+                trackerFoundFlag = true
+
+                val flatDict=Bencoding.decodeFlatDictionary(httpResponse) as Map<*,*>
+                val peersList : ArrayList<KnownPeer> = getPeersList(flatDict["peers"] as ByteArray)
+
+                val jsonPeersList = gson.toJson(peersList).toByteArray()
+                peersDB.loadToDB(infohash, jsonPeersList)
+
+                updateScrapeStatsFromAnnounceResponse(dict["complete"] as Int?, dict["incomplete"] as Int? , scrapeMap ,scrapeID)
+
+                resultInterval = (dict["interval"] as Long).toInt()
+
+                break
             }
+        }
 
-            val jason = gson.toJson(list).toByteArray()
-            peersDB.loadToDB(infohash, jason)
-            return dict["interval"] as Int
-        }
-        
-        if(!trackerSucceededFlag){
-            throw TrackerException(errorMessage)
-        }
-*/
-        return -1;
+
+        // update the scrape
+        val scarpeLiJson = gson.toJson(scrapeMap).toByteArray()
+        scrapeDB.loadToDB(infohash, scarpeLiJson)
+
+
+        if (trackerFoundFlag) return resultInterval
+        else throw TrackerException(errorMessage)
+
+        // should not get here
+        return -1
     }
-
-    fun ip_selector(p: KnownPeer): Int = p.ip[0].toInt()*256*256*256+ p.ip[1].toInt()*256*256+ p.ip[2].toInt()*256+ p.ip[3].toInt()
 
     /**
      * Scrape all trackers identified by a torrent, and store the statistics provided. The specification for the scrape
@@ -222,45 +247,44 @@ class CourseTorrent  @Inject constructor(private val fac : SecureStorageFactory,
      * @throws IllegalArgumentException If [infohash] is not loaded.
      */
     fun scrape(infohash: String): Unit {
-        /*if(!scrapeDB.DBContains(infohash)) throw IllegalArgumentException()
+        if(!announceDB.DBContains(infohash)) throw IllegalArgumentException()
 
-        val announce_list = this.announces(infohash)
+        val announceListList = this.announces(infohash)
+        val announceList = URL_Utils.announceUrls(announceListList)
 
         val scrapeMap = HashMap<String,ScrapeData>()
 
-        for (t in announce_list) {
-            var tracker: String = t.first()
+        for (t in announceList) {
+            var tracker: String = t
+            val scrapeID = URL_Utils.removeAnnounceFromUrl(tracker)
 
+            val lastIndexOfBackslash = tracker.lastIndexOf(char = '/')
+            if(!tracker.substring(lastIndexOfBackslash+1).startsWith("announce")) continue
+            tracker = tracker.replaceRange(IntRange(lastIndexOfBackslash + 1, lastIndexOfBackslash + 8), "scrape")
 
-            val last_index = tracker.lastIndexOf(char = '/')
-            if ((tracker.length - 1 < last_index + 8) || (tracker.substring(
-                    last_index + 1,
-                    last_index + 9
-                ) != "announce")
-            ) continue
-            println("before:" + tracker)
-            tracker = tracker.replaceRange(IntRange(last_index + 1, last_index + 9), "scrape")
-            println("after:" + tracker)
+            val request = HttpHandler.scrapeRequestFormat(tracker, infohash)
 
-            tracker = tracker + "?"
-            tracker = tracker + "info_hash" + "=" + infohash
+            val bencoded_dict = HttpHandler.sendGetRequest(request)
+            val fileDict = Bencoding.decodeValue(bencoded_dict) as Map<*, *>
 
-            val bencoded_dict = HttpHandler.sendGetRequest(tracker).toString()
-            val fileDict = Bencoding.decodeValue(bencoded_dict.toByteArray()) as Map<*, *>
+            val fffDict = fileDict["files"] as Map<*,*>
 
-            for (file in fileDict.keys) {
-                val scrape = fileDict[file] as Map<*, *>
-                val complete = scrape["complete"] as Int
-                val downloaded = scrape["downloaded"] as Int
-                val incomplete = scrape["incomplete"] as Int
+            for (file in fffDict.keys) {
+
+                val scrape = fffDict[file] as Map<*, *>
+
+                val complete = (scrape["complete"] as Long).toInt()
+                val downloaded = (scrape["downloaded"] as Long).toInt()
+                val incomplete = (scrape["incomplete"] as Long).toInt()
                 val name = scrape["name"] as String?
+
                 val new_scrape = Scrape(complete, downloaded, incomplete, name)
-                scrapeMap[tracker] = new_scrape
+                scrapeMap[scrapeID] = new_scrape
             }
         }
 
-        val scarpeJson = gson.toJson(scrapeMap).toByteArray()
-        scrapeDB.loadToDB(infohash, scarpeJson)*/
+        val jsonScrapeList = gson.toJson(scrapeMap).toByteArray()
+        scrapeDB.loadToDB(infohash, jsonScrapeList)
     }
 
     /**
@@ -273,9 +297,10 @@ class CourseTorrent  @Inject constructor(private val fac : SecureStorageFactory,
      * @throws IllegalArgumentException If [infohash] is not loaded.
      */
     fun invalidatePeer(infohash: String, peer: KnownPeer): Unit {
+
         // this check is already done in knownPeers
         // if(!announceDB.DBContains(infohash)) throw IllegalArgumentException()
-        val list : ArrayList<KnownPeer> = this.knownPeers(infohash) as ArrayList
+        val list : ArrayList<KnownPeer> = this.knownPeers(infohash) as ArrayList<KnownPeer>
 
         var isChanged = false
         for (p in list){
@@ -303,10 +328,19 @@ class CourseTorrent  @Inject constructor(private val fac : SecureStorageFactory,
      * @throws IllegalArgumentException If [infohash] is not loaded.
      * @return Sorted list of known peers.
      */
+
     fun knownPeers(infohash: String): List<KnownPeer> {
         if(!announceDB.DBContains(infohash)) throw IllegalArgumentException()
-        var peerListJson = peersDB.loadFromDB(infohash).toString()
-        return gson.fromJson<ArrayList<KnownPeer>>(peerListJson,  ArrayList::class.java)
+
+        lateinit var peerList : ArrayList<KnownPeer>
+        try{
+            val peerListJson = peersDB.loadFromDB(infohash).toString(charset)
+            peerList =  gson.fromJson<ArrayList<KnownPeer>>(peerListJson,  ArrayList::class.java) as ArrayList<KnownPeer>
+        } catch (e : IllegalArgumentException){
+            peerList = ArrayList<KnownPeer>()
+        }
+
+        return peerList.sortedBy {ipSelector(it)}
     }
 
     /**
@@ -328,8 +362,98 @@ class CourseTorrent  @Inject constructor(private val fac : SecureStorageFactory,
      * @return A mapping from tracker announce URL to statistics.
      */
     fun trackerStats(infohash: String): Map<String, ScrapeData> {
+
         if(!announceDB.DBContains(infohash)) throw IllegalArgumentException()
-        val jsonMap = scrapeDB.loadFromDB(infohash).toString()
-        return gson.fromJson<HashMap<String,ScrapeData>>(jsonMap,  HashMap::class.java)
+
+        val jsonScrapeList = scrapeDB.loadFromDB(infohash).toString(charset)
+        //scrapeMap = gson.fromJson<HashMap<String, ScrapeData>>(jsonScrapeList, HashMap::class.java)
+
+        val type: Type = object : TypeToken<HashMap<String,Scrape>>() {}.getType()
+        val scrapeMap : HashMap<String,Scrape> = gson.fromJson(jsonScrapeList, type)
+        return scrapeMap
     }
+
+
+    private fun getPeersList(peers:ByteArray):ArrayList<KnownPeer>{
+        val decodedPeers = Bencoding.decodeValue(peers)
+
+        if(decodedPeers is HashMap<*,*>) return getPeersListFromDict(decodedPeers)
+        else if(decodedPeers is String){
+            val colonIndex = peers.indexOfFirst { it == ':'.toByte() }
+            val ppeers = peers.sliceArray(IntRange(colonIndex + 1, peers.lastIndex))
+            return getPeersListFromBinary(ppeers)
+        }
+        else throw IllegalArgumentException()
+    }
+
+
+    private fun getPeersListFromDict(peers : HashMap<*,*>):ArrayList<KnownPeer>{
+        val list : ArrayList<KnownPeer> = ArrayList<KnownPeer>()
+        for (d in peers){
+            d as Map<*,*>
+            val peerIP = d["ip"] as String
+            val peerPort = d["port"] as Int
+            val peerID2 = (d["peer id"] ?: null) as String?
+            val newPeer = KnownPeer(peerIP, peerPort, peerID2)
+            list.add(newPeer)
+        }
+        return list
+    }
+
+
+    private fun getPeersListFromBinary(peers : ByteArray):ArrayList<KnownPeer>{
+
+        val list : ArrayList<KnownPeer> = ArrayList<KnownPeer>()
+
+        var peersss = peers
+
+        while (peersss.size > 0){
+            var new_peer = KnownPeer(byte2int(peersss[0]).toString(10) + "." + byte2int(peersss[1]).toString(10) + "." + byte2int(peersss[2]).toString(10) + "." + byte2int(peersss[3]).toString(10),
+                    byte2int(peersss[4])*256+byte2int(peersss[5]), peerId = null)
+            list.add(new_peer)
+            peersss = peersss.sliceArray(IntRange(6, peersss.lastIndex))
+        }
+        return ArrayList<KnownPeer>()
+    }
+
+
+    fun ipSelector(p: KnownPeer):  Long {
+        val ip = p.ip.split('.')
+        return ip[0].toLong()*256*256*256+ ip[1].toLong()*256*256+ ip[2].toLong()*256+ ip[3].toLong()
+    }
+
+    private fun updateScrapeStatsFromAnnounceResponse
+            (complete:Int?, incomplete:Int?, scrapeMap:HashMap<String, ScrapeData> ,scrapeID:String):Unit{
+
+        if(complete == null && incomplete == null) return
+
+        val curScrape : ScrapeData? = scrapeMap[scrapeID]
+
+        if (curScrape == null || curScrape is Failure){
+
+            val newComplete: Int = complete ?: 0
+            val newDownloaded: Int = 0
+            val newIncomplete: Int = incomplete ?: 0
+            val newName: String? = null
+            val newScrape = Scrape (newComplete, newDownloaded, newIncomplete, newName)
+            scrapeMap[scrapeID] = newScrape
+
+        } else if(curScrape is Scrape){
+
+            val newComplete: Int = complete ?: curScrape.complete
+            val newDownloaded: Int = curScrape.downloaded
+            val newIncomplete: Int = incomplete ?: curScrape.incomplete
+            val newName: String? = curScrape.name
+            val newScrape = Scrape (newComplete, newDownloaded, newIncomplete, newName)
+            scrapeMap[scrapeID] = newScrape
+
+        }
+    }
+
+    private fun byte2int(b : Byte) : Int {
+        return b.toInt() and 0xff
+    }
+
 }
+
+

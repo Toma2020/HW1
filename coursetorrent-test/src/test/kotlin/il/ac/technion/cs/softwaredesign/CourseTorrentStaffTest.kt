@@ -1,5 +1,7 @@
 package il.ac.technion.cs.softwaredesign
 
+import DB_Mananger
+import SecureStorageDummy
 import com.google.inject.Guice
 import com.natpryce.hamkrest.*
 import com.natpryce.hamkrest.assertion.assertThat
@@ -12,6 +14,7 @@ import java.io.InputStreamReader
 import java.net.HttpURLConnection
 import java.net.URLEncoder
 import java.net.URL
+import com.google.gson.Gson
 
 class CourseTorrentStaffTest {
     private val injector = Guice.createInjector(CourseTorrentModule())
@@ -24,6 +27,8 @@ class CourseTorrentStaffTest {
 
         val mURL = URL("http://bt1.archive.org:6969/announce?info_hash=%ac%c3%b2%e43%d7%c7GZ%bbYA%b5h%1c%b7%a1%ea%26%e2&peer_id=ABCDEFGHIJKLMNOPQRST&ip=80.11.255.166&port=6881&downloaded=0&left=970")
 
+
+        println("Response : " + "suka blat")
         with(mURL.openConnection() as HttpURLConnection)
         {
             // optional default is GET
@@ -41,14 +46,49 @@ class CourseTorrentStaffTest {
                     inputLine = it.readLine()
                 }
                 it.close()
-                println("Response : $response")
+                val a = response.toString()
+                println("Response : $a")
             }
         }
     }
 
     @Test
+    fun `blat2`()
+    {
+
+        var list : MutableList<KnownPeer> = ArrayList<KnownPeer>()
+        var new_peer = KnownPeer("1234", 100, peerId = "cusrabak")
+        list.add(new_peer)
+        var new_peer2 = KnownPeer("abcd", 56000, peerId = null)
+        list.add(new_peer2)
+        var new_peer3 = KnownPeer("pizd", 15, peerId = "a")
+        list.add(new_peer3)
+
+        val gson = Gson()
+        val jason = gson.toJson(list).toByteArray()
+        val db = DB_Mananger(SecureStorageDummy())
+        db.loadToDB("infohash", jason)
+
+        /*val data = db.loadFromDB("infohash")
+        var peerListJson = db.loadFromDB("infohash").toString()
+        val list2 = gson.fromJson<ArrayList<KnownPeer>>(peerListJson,  ArrayList::class.java)
+*/
+        val list3 = gson.fromJson<ArrayList<KnownPeer>>(String(jason),  ArrayList::class.java)
+        println("yay")
+
+    }
+
+
+    @Test
     fun `blat`()
     {
+
+        val peersss = "01"
+        println(peersss.get(0).toInt()*256+peersss.get(1).toInt())
+        val gson = Gson()
+        val numbers = mutableListOf(1, 2, 3, 4)
+        //gson.toJson(numbers).toby
+
         val x = 5
         var h : HashMap<Int, Int> = HashMap<Int, Int> ()
         h[3]

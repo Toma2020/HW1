@@ -67,6 +67,7 @@ class CourseTorrentTest2 {
         )
     }
 
+    @Test
     fun `announce, invalidate peer`() {
         val infohash = torrent.load(debian)
 
@@ -139,6 +140,28 @@ class CourseTorrentTest2 {
                 equalTo(mapOf(Pair("http://bttracker.debian.org:6969", Scrape(0, 2, 10, null) as ScrapeData)))
         )
 
+    }
+
+    @Test
+    fun `announce updates scrape data`()
+    {
+        val infohash = torrent.load(debian)
+
+        HttpMock.setResponse(StringBuffer("d8:completei4e10:downloadedi2e8:intervali1950e12:min intervali975e5:peers12:012301e"))
+
+        /* Returned peer list is: [("127.0.0.22", 6887)] */
+        val inter = torrent.announce(infohash, TorrentEvent.STARTED, 0, 0, 2703360)
+
+        assertThat(
+                torrent.trackerStats(infohash),
+                equalTo(mapOf(Pair("http://bttracker.debian.org:6969", Scrape(4, 2, 0, null) as ScrapeData)))
+        )
+        assertThat(inter, equalTo(1950))
+
+        HttpMock.setResponse(StringBuffer("d14:failure reason1:fe"))
+
+        torrent.announce(infohash, TorrentEvent.STARTED, 0, 0, 2703360)
+        assertThat( torrent.trackerStats(infohash).size, equalTo(0));
     }
 
 

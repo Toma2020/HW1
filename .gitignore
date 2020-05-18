@@ -2,3 +2,6 @@
 /gradlew
 /gradlew.bat
 /README.md
+coursetorrent-app/build/
+coursetorrent-test/build/
+library/build/

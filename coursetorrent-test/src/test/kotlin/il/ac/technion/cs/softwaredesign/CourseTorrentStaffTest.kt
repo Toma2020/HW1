@@ -2,19 +2,27 @@ package il.ac.technion.cs.softwaredesign
 
 import DB_Mananger
 import SecureStorageDummy
+import com.google.gson.Gson
 import com.google.inject.Guice
 import com.natpryce.hamkrest.*
 import com.natpryce.hamkrest.assertion.assertThat
 import dev.misfitlabs.kotlinguice4.getInstance
 import org.junit.jupiter.api.Test
 import org.junit.jupiter.api.assertDoesNotThrow
-
 import java.io.BufferedReader
 import java.io.InputStreamReader
+import java.lang.reflect.Type
+import com.google.common.reflect.TypeToken
 import java.net.HttpURLConnection
-import java.net.URLEncoder
 import java.net.URL
-import com.google.gson.Gson
+import java.util.*
+import kotlin.collections.ArrayList
+import kotlin.collections.MutableList
+import kotlin.collections.distinct
+import kotlin.collections.mapOf
+import kotlin.collections.mutableListOf
+import kotlin.collections.set
+
 
 class CourseTorrentStaffTest {
     private val injector = Guice.createInjector(CourseTorrentModule())
@@ -55,7 +63,19 @@ class CourseTorrentStaffTest {
     @Test
     fun `blat2`()
     {
+        val peersss = "0123".toByteArray()
+        val b : Byte
+        b = 200.toByte()
+        println(b.toInt() and 0xff)
 
+        fun byte2int(b : Byte) : Int
+        {
+            return b.toInt() and 0xff
+        }
+        println(byte2int(peersss[0]).toString(10) + "." + byte2int(peersss[1]).toString(10) + "." + byte2int(peersss[2]).toString(10) + "." + byte2int(peersss[3]).toString(10))
+        println(torrent.ip_selector(KnownPeer("192.168.1.2",22, null)))
+
+        return
         val ENCODED_HREF = java.net.URLEncoder.encode("5a", "utf-8")
         println(ENCODED_HREF)
         return
@@ -87,10 +107,20 @@ class CourseTorrentStaffTest {
     {
 
         val peersss = "01" // 0x3031 = 12337
-        println(peersss.get(0).toInt()*256+peersss.get(1).toInt())
+        //println(peersss.get(0).toInt()*256+peersss.get(1).toInt())
         val gson = Gson()
         val numbers = mutableListOf(1, 2, 3, 4)
-        //gson.toJson(numbers).toby
+        val sm = HashMap<String,Scrape>()
+        sm["a"] = Scrape(1, 2, 3, null)
+        sm["b"] = Scrape(13, 23, 33, null)
+
+
+        val scarpeJson = gson.toJson(sm)
+        val type: Type = object : TypeToken<HashMap<String,Scrape>>() {}.getType()
+        val clonedMap: HashMap<String, Scrape> = gson.fromJson(scarpeJson, type)
+        (clonedMap["a"]as Scrape).complete = 9;
+        val bla = gson.fromJson<HashMap<String,Scrape>>(scarpeJson,HashMap::class.java)
+        ((bla as HashMap<String,Scrape>)["a"] as Scrape).complete  = 9;
 
         val x = 5
         var h : HashMap<Int, Int> = HashMap<Int, Int> ()

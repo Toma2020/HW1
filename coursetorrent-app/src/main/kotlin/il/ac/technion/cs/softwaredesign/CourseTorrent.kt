@@ -3,6 +3,7 @@ package il.ac.technion.cs.softwaredesign
 import il.ac.technion.cs.softwaredesign.exceptions.TrackerException
 import Bencoding
 import DB_Mananger
+import NetHandler
 import com.google.inject.Inject
 import il.ac.technion.cs.softwaredesign.storage.SecureStorageFactory
 import kotlin.random.Random
@@ -17,7 +18,7 @@ import com.google.inject.Guice
  * + Parsing torrent metainfo files (".torrent" files)
  * + Communication with trackers (announce, scrape).
  */
-class CourseTorrent  @Inject constructor(private val fac : SecureStorageFactory) {
+class CourseTorrent  @Inject constructor(private val fac : SecureStorageFactory, private val netHandler : NetHandler) {
 
     private val announceDB = DB_Mananger(fac.open("announceDB".toByteArray()))
     private val peersDB = DB_Mananger(fac.open("peersDB".toByteArray()))

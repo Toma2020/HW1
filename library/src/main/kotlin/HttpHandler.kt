@@ -1,13 +1,14 @@
+import il.ac.technion.cs.softwaredesign.storage.SecureStorage
 import java.io.BufferedReader
 import java.io.InputStreamReader
 import java.net.HttpURLConnection
 import java.net.URL
 
 
-class HttpHandler
+class HttpHandler : NetHandler
 {
 
-    fun sendGetRequest(requestURL: String): StringBuffer
+    override fun sendGetRequest(requestURL: String): StringBuffer
     {
         //val mURL = URL("https://postman-echo.com/get?foo1=bar1&foo2=bar2")
         val mURL = URL(requestURL)

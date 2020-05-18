@@ -56,6 +56,9 @@ class CourseTorrentStaffTest {
     fun `blat2`()
     {
 
+        val ENCODED_HREF = java.net.URLEncoder.encode("5a", "utf-8")
+        println(ENCODED_HREF)
+        return
         var list : MutableList<KnownPeer> = ArrayList<KnownPeer>()
         var new_peer = KnownPeer("1234", 100, peerId = "cusrabak")
         list.add(new_peer)
@@ -83,7 +86,7 @@ class CourseTorrentStaffTest {
     fun `blat`()
     {
 
-        val peersss = "01"
+        val peersss = "01" // 0x3031 = 12337
         println(peersss.get(0).toInt()*256+peersss.get(1).toInt())
         val gson = Gson()
         val numbers = mutableListOf(1, 2, 3, 4)
